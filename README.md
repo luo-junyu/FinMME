@@ -6,7 +6,9 @@
 
 ## 🔥 Overview
 
-**FinMME** is a comprehensive benchmark dataset designed to evaluate Multimodal Large Language Models (MLLMs) in the financial domain. With over **11,000 high-quality financial samples** spanning **18 financial domains** and **6 asset classes**, FinMME provides a rigorous evaluation framework for financial multimodal reasoning capabilities.
+Paper Link: [Arxiv](https://arxiv.org/abs/2505.24714).
+
+**FinMME** is a comprehensive benchmark dataset designed to evaluate Multimodal Large Language Models (MLLMs) in the financial domain. With around **11,000 high-quality financial samples** spanning **18 financial domains** and **6 asset classes**, FinMME provides a rigorous evaluation framework for financial multimodal reasoning capabilities.
 
 ![Taxonomy](plot/taxo.png)
 
@@ -109,13 +111,13 @@ FinScore = Domain_Normalized_Score × (1 - Hallucination_Penalty)
 
 ## 📚 Citation
 
-If you use FinMME in your research, please cite:
+If you find FinMME useful, please consider citing:
 
 ```bibtex
-@article{luo2024finmme,
-  title={FINMME: Benchmark Dataset for Financial Multi-Modal Reasoning Evaluation},
-  author={Luo, Junyu and Kou, Zhizhuo and Yang, Liming and Luo, Xiao and Huang, Jinsheng and Xiao, Zhiping and Peng, Jingshu and Liu, Chengzhong and Ji, Jiaming and Liu, Xuanzhe and Han, Sirui and Zhang, Ming and Guo, Yike},
-  journal={ACL 2025},
-  year={2024}
+@article{luo2025finmme,
+  title={FinMME: Benchmark Dataset for Financial Multi-Modal Reasoning Evaluation},
+  author={Luo, Junyu and Kou, Zhizhuo and Yang, Liming and Luo, Xiao and Huang, Jinsheng and Xiao, Zhiping and Peng, Jingshu and Liu, Chengzhong and Ji, Jiaming and Liu, Xuanzhe and others},
+  journal={arXiv preprint arXiv:2505.24714},
+  year={2025}
 }
 ```
