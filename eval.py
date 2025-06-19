@@ -130,6 +130,7 @@ def process_single_item(args):
             'verified_caption': item.get('verified_caption', ''),
             'related_sentences': item.get('related_sentences', ''),
             'tolerance': item.get('tolerance', 0.0),
+            'knowledge_domain': item.get('knowledge_domain', ''),
             'model_answer': model_answer,
             'pred_answer': pred_answer,
             'correct_or_not': is_correct
@@ -143,63 +144,93 @@ def process_single_item(args):
 def load_dataset_streaming(dataset_name: str, split: str = "train") -> Iterator[Dict]:
     dataset = load_dataset(dataset_name, split=split, streaming=True)
     for idx, item in enumerate(dataset):
-        yield {
-            'idx': idx,
-            'image': item['image'],
-            'question_text': item.get('question_text', ''),
-            'question_type': item.get('question_type', ''),
-            'answer': item.get('answer', ''),
-            'options': item.get('options', ''),
-            'unit': item.get('unit', ''),
-            'verified_caption': item.get('verified_caption', ''),
-            'related_sentences': item.get('related_sentences', ''),
-            'tolerance': item.get('tolerance', 0.0)
-        }
+        new_item = item.copy()
+        new_item['idx'] = idx
+        yield new_item
 
 def get_existing_results(output_file: str) -> set:
     if os.path.exists(output_file):
-        return set(pd.read_excel(output_file)['idx'].tolist())
+        try:
+            return set(pd.read_excel(output_file)['idx'].tolist())
+        except Exception as e:
+            print(f"Could not read existing results from {output_file}: {e}")
+            return set()
     return set()
 
+def calculate_finscore(df: pd.DataFrame):
+    """Calculates and prints the FinScore, Hallucination Rate, and Final Score."""
+    if 'knowledge_domain' not in df.columns or df['knowledge_domain'].isnull().all():
+        print("Warning: 'knowledge_domain' column not found or is empty. Cannot calculate FinScore.")
+        return
+
+    domain_scores = df.groupby('knowledge_domain')['correct_or_not'].mean()
+    domain_normed_scores = domain_scores.mean()
+    multi_answer_df = df[(df['question_type'] == 'multiple_choice') & (df['answer'].astype(str).str.len() > 1)]
+    hallucination_rate = 0.0
+    if not multi_answer_df.empty:
+        hallucination_rate = (~multi_answer_df['correct_or_not']).mean()
+        
+    finscore = domain_normed_scores * (1 - hallucination_rate)
+    
+    print("-" * 20)
+    print("FinMME Benchmark Scores:")
+    print(f"FinScore: {finscore:.2f}")
+    print("-" * 20)
+
 def main(dataset_name: str = "luojunyu/FinMME", split: str = "train", 
-         sample_size: int = None, num_processes: int = 4):
+         sample_size: int = None, num_processes: int = 8):
     
     output_file = f'eval_hf_{model.replace("/", "_").replace("-", "_")}.xlsx'
-    processed_indices = get_existing_results(output_file)
     
-    items_to_process = []
-    for item in load_dataset_streaming(dataset_name, split):
-        if sample_size and len(items_to_process) >= sample_size:
-            break
-        if item['idx'] not in processed_indices:
-            items_to_process.append(item)
+    # 1. Load existing results
+    try:
+        existing_df = pd.read_excel(output_file)
+        processed_indices = set(existing_df['idx'].tolist())
+    except FileNotFoundError:
+        existing_df = pd.DataFrame()
+        processed_indices = set()
+
+    # 2. Create a generator for items to process
+    items_stream = (item for item in load_dataset_streaming(dataset_name, split) if item['idx'] not in processed_indices)
+    if sample_size:
+        from itertools import islice
+        items_stream = islice(items_stream, sample_size)
     
-    if not items_to_process:
-        print("No items to process")
-        return
+    process_args_stream = ((item, api_key, base_url) for item in items_stream)
     
-    process_args = [(item, api_key, base_url) for item in items_to_process]
-    
+    # 3. Process items in parallel
+    new_results = []
     with Pool(processes=num_processes) as pool:
-        results = list(tqdm(
-            pool.imap_unordered(process_single_item, process_args),
-            total=len(items_to_process),
-            desc="Processing items"
-        ))
-    
-    valid_results = [r for r in results if r is not None]
-    
-    if valid_results:
-        new_df = pd.DataFrame(valid_results)
-        if os.path.exists(output_file):
-            existing_df = pd.read_excel(output_file)
-            combined_df = pd.concat([existing_df, new_df], ignore_index=True)
-        else:
-            combined_df = new_df
-        combined_df.to_excel(output_file, index=False)
+        # Estimate total for tqdm progress bar
+        FINMME_TOTAL_COUNT = 11099 
+        total = sample_size if sample_size else FINMME_TOTAL_COUNT - len(processed_indices)
         
+        desc = f"Processing with {num_processes} processes"
+        results_iterator = pool.imap_unordered(process_single_item, process_args_stream)
+        
+        for result in tqdm(results_iterator, total=total, desc=desc):
+            if result:
+                new_results.append(result)
+
+    # 4. Combine, save, and report results
+    if not new_results:
+        print("\nNo new items were processed.")
+        if existing_df.empty:
+            return
+        combined_df = existing_df
+    else:
+        new_df = pd.DataFrame(new_results)
+        combined_df = pd.concat([existing_df, new_df], ignore_index=True).sort_values(by='idx').reset_index(drop=True)
+
+    if not combined_df.empty:
+        combined_df.to_excel(output_file, index=False)
+        print(f"\nResults saved to {output_file}")
         accuracy = combined_df['correct_or_not'].mean()
         print(f"Overall accuracy: {accuracy:.2%}")
+        calculate_finscore(combined_df)
+    else:
+        print("No results to process or save.")
+
 
 if __name__ == "__main__":
     import argparse
@@ -207,7 +238,7 @@ if __name__ == "__main__":
     parser.add_argument('--dataset', default='luojunyu/FinMME')
     parser.add_argument('--split', default='train')
     parser.add_argument('--sample_size', type=int, default=None)
-    parser.add_argument('--num_processes', type=int, default=4)
+    parser.add_argument('--num_processes', type=int, default=16)
     args = parser.parse_args()
     
     main(args.dataset, args.split, args.sample_size, args.num_processes) 
